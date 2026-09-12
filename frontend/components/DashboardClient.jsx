@@ -1,10 +1,10 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Component, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import Sidebar from './Sidebar'
 import { getJSON } from '../lib/api'
-import { PageHeader,KpiCard,Panel,DataTable,StatusBadge,fmtMoney,fmtNumber,fmtPct,EmptyState } from './UI'
+import { PageHeader,KpiCard,Panel,DataTable,StatusBadge,IconBox,fmtMoney,fmtNumber,fmtPct,EmptyState } from './UI'
 import { TrendChart,HorizontalBars,HealthDonut,MatrixChart,CostDonut,BridgeChart,OeePlantChart,SimpleBars,OeeTrend,ForecastChart,CapacityChart,ServiceChart,MultiPlantTrend,FamilyWeekChart,MaterialTrend,SupplierChart,FinanceTrend } from './Charts'
 
 const meta={
@@ -26,7 +26,7 @@ const meta={
  'qualidade-dados':['Qualidade dos Dados','Completeza, consistência, linhagem e confiança da base industrial'],
  'meu-plano':['Meu Plano','Recursos disponíveis e evolução do produto'], ajuda:['Ajuda','Como ler e operar o Industrial Performance']
 }
-const ACTIVE_SCREENS=new Set(['multiplantas','cockpit','pcp','oee','capacidade','materiais','logistica','financas','diagnostico','alavancas','central-dados'])
+const ACTIVE_SCREENS=new Set(['multiplantas','cockpit','pcp','oee','capacidade','materiais','logistica','financas','diagnostico','alavancas','plano-acao','agente','relatorios','central-dados'])
 const NO_PLANT=new Set(['multiplantas','central-dados'])
 
 export default function DashboardClient({screen}){
@@ -47,13 +47,21 @@ export default function DashboardClient({screen}){
    {!enabled?<EmptyState title={`${title} — no radar`} text="A tela permanece no roadmap e só será liberada quando conteúdo, matemática, dados, interação e causalidade estiverem fechados."/>:
     loading?<div className="empty-state compact-loader"><h2>Carregando dados…</h2><p>Conectando ao motor Industrial Performance.</p></div>:
     err?<div className="empty-state"><h2>Não foi possível carregar os dados</h2><p>{err}</p><button className="control-btn control-primary" onClick={()=>setReloadKey(k=>k+1)}>Tentar novamente</button></div>:
-    <Screen screen={screen} data={data} plant={plant}/>
+    <RuntimeBoundary key={`${screen}-${plant}-${reloadKey}`}><Screen screen={screen} data={data} plant={plant}/></RuntimeBoundary>
    }
-   <div className="footer-note">Industrial Performance v1.0.5 • Executive Intelligence Closure • dados, análises, drill-down e reconciliações em validação</div>
+   <div className="footer-note">Industrial Performance v1.0.6 • Functional Closure • dados, análises, drill-down e reconciliações em validação</div>
  </div></main></div>
 }
 
-function Screen({screen,data,plant}){ const map={multiplantas:Multiplantas,cockpit:Cockpit,pcp:PCP,oee:OEE,capacidade:Capacidade,materiais:Materiais,logistica:Logistica,financas:Financas,diagnostico:Diagnostico,alavancas:Alavancas,'central-dados':CentralDados}; const C=map[screen]; return C?<C data={data} plant={plant}/>:<EmptyState/> }
+
+class RuntimeBoundary extends Component{
+ constructor(props){super(props);this.state={error:null}}
+ static getDerivedStateFromError(error){return {error}}
+ componentDidCatch(error,info){if(typeof console!=='undefined')console.error('Industrial Performance runtime error',error,info)}
+ render(){if(this.state.error)return <div className="empty-state runtime-error"><h2>Erro de renderização isolado</h2><p>{String(this.state.error?.message||this.state.error)}</p><p>A navegação e o restante do aplicativo permanecem disponíveis. Esta tela precisa de correção antes de ser promovida.</p></div>;return this.props.children}
+}
+
+function Screen({screen,data,plant}){ const map={multiplantas:Multiplantas,cockpit:Cockpit,pcp:PCP,oee:OEE,capacidade:Capacidade,materiais:Materiais,logistica:Logistica,financas:Financas,diagnostico:Diagnostico,alavancas:Alavancas,'plano-acao':PlanoAcao,agente:Agente,relatorios:Relatorios,'central-dados':CentralDados}; const C=map[screen]; return C?<C data={data} plant={plant}/>:<EmptyState/> }
 function Drill({href,children}){return href?<Link className="drill-link" href={href}>{children} →</Link>:<span>{children}</span>}
 function AnalysisList({items=[]}){return <div className="analysis-list">{items.map((x,i)=><div className="analysis-card" key={i}><strong>{i+1}. {x.title}</strong><span>{x.text}</span></div>)}</div>}
 function RecommendationList({items=[]}){return <div className="alert-list">{items.map((x,i)=><div className="alert" key={i}><span className="alert-dot good-dot">{x.priority||i+1}</span><div><b>{x.action}</b>{x.problem&&<span>{x.problem}</span>}</div>{x.path&&<Drill href={x.path}>Abrir</Drill>}</div>)}</div>}
@@ -208,17 +216,29 @@ function Financas({data}){
  </div></>
 }
 
+
+function ValidatedCausalTree({model}){
+ const root=model?.root||{}, branches=model?.branches||[]
+ if(!branches.length)return <div className="data-note">Árvore causal não disponível com evidência suficiente.</div>
+ return <div className="validated-causal-tree">
+   <div className="causal-root node red"><strong>{root.label||'OEE abaixo da meta'}</strong><span>{fmtPct(root.current)} vs. meta {fmtPct(root.target)}</span><b>{root.gap!=null?`${fmtNumber(Number(root.gap)*100,1)} p.p.`:'—'} · {fmtMoney(root.impact)}</b></div>
+   <div className="causal-branch-list">{branches.map((b,i)=><div className="causal-branch" key={b.component||i}><span className="branch-connector">→</span><div className={`node ${i===0?'orange':i===1?'green':'blue'}`}><strong>{b.component}</strong><span>{fmtPct(b.current)} vs. {fmtPct(b.target)}</span><b>{b.gap!=null?`${fmtNumber(Number(b.gap)*100,1)} p.p.`:'—'} · {fmtMoney(b.impact)}</b></div><span className="branch-connector">→</span><div className="node cause-node"><strong>{b.offender||'Dado necessário'}</strong><span>{b.evidence||'Evidência não disponível'}</span></div><div className="evidence-list"><span className="evidence-title">Causa raiz / evidência</span>{(b.evidence_items||[]).slice(0,4).map((e,j)=><div key={j}><i>•</i><span><b>{e.label}</b>{e.evidence&&` — ${e.evidence}`}</span>{e.impact? <em>{fmtMoney(e.impact)}</em>:null}</div>)}</div></div>)}</div>
+   <div className="causal-note">{model?.note}</div>
+ </div>
+}
+function QuadrantSummary({matrix}){const c=matrix?.counts||{},v=matrix?.values||{};const names=['Quick Wins','Grandes Projetos','Melhorias Incrementais','Projetos Estruturantes'];return <div className="quadrant-summary">{names.map(n=><div key={n} className={`quadrant-chip ${n==='Quick Wins'?'qw':n==='Grandes Projetos'?'gp':n==='Melhorias Incrementais'?'mi':'pe'}`}><span>{n}</span><b>{fmtNumber(c[n]||0)} ações</b><small>{fmtMoney(v[n]||0)}</small></div>)}</div>}
+
 function Diagnostico({data}){
  const search=useSearchParams(); const focus=search.get('focus'); const front=search.get('front')
- const c=data.cards||{},probs=data.problems||[],priced=data.priced_problems||[],top=probs[0],matrix=priced.map(x=>({name:x.problem,impact:x.impact,effort:x.effort}))
+ const c=data.cards||{},probs=data.problems||[],priced=data.priced_problems||[],top=probs[0],matrix=data.matrix?.items||priced.map(x=>({name:x.problem,impact:x.impact,effort:x.effort,quadrant:x.quadrant}))
  const focused=probs.find(x=>(focus&&String(x.problem||'').toLowerCase().includes(focus.toLowerCase()))||(front&&x.front===front))
  return <><div className="kpi-grid cols-6"><KpiCard label="Problemas identificados" value={fmtNumber(c.problems)} foot="6 frentes avaliadas" icon="⌕"/><KpiCard label="Impacto financeiro total" value={fmtMoney(c.impact)} foot="impactos diretos únicos" state="bad" icon="!"/><KpiCard label="Potencial de captura" value={fmtMoney(c.potential)} foot="premissa MVP explícita" state="good" icon="↗"/><KpiCard label="Quick-wins" value={fmtMoney(c.quick_value)} foot="até 90 dias" icon="⚡"/><KpiCard label="Ações recomendadas" value={fmtNumber(c.actions)} foot="priorizadas" icon="◎"/><KpiCard label="Payback médio" value={c.payback_months?`${fmtNumber(c.payback_months,1)} meses`:'N/D'} foot="investimento necessário para calcular" icon="▦"/></div>
  { (focus||front) && <Panel title="Drill-down recebido" subtitle="Recorte vindo da tela operacional; aprofunde sem perder o contexto da planta." tag="CONTEXTO" icon="⌕">{focused?<div className="focus-strip"><div><span>Frente</span><strong>{focused.front}</strong></div><div><span>Problema</span><strong>{focused.problem}</strong></div><div><span>Evidência</span><strong>{focused.evidence||'Dado necessário'}</strong></div><div><span>Impacto / risco</span><strong>{focused.impact?fmtMoney(focused.impact):fmtMoney(focused.risk_value)}</strong></div></div>:<div className="data-note">O recorte foi preservado, mas não há correspondência exata no Pareto atual; use a frente abaixo para aprofundar.</div>}</Panel>}
  <div className="grid grid-12">
   <Panel className="span-6" title="Resumo por frente" subtitle="Problemas, impacto direto, risco e potencial de captura." tag="6 FRENTES" icon="▦"><DataTable rows={data.fronts||[]} columns={[{key:'front',label:'Frente'},{key:'problems',label:'Problemas'},{key:'impact',label:'Impacto',render:v=>fmtMoney(v)},{key:'risk',label:'Risco',render:v=>fmtMoney(v)},{key:'potential',label:'Potencial',render:v=>fmtMoney(v)},{key:'capture',label:'% captura',render:v=>v===null?'—':fmtPct(v)}]}/></Panel>
-  <Panel className="span-6" title="Árvore de causas" subtitle="KPI → desvio → componente → ofensor → causa/evidência → impacto." tag="EVIDÊNCIA" icon="⌘"><div className="causal-stack">{(data.causal_tree||[]).slice(0,5).map((x,i)=><div className="causal-row" key={i}><div className="node red"><strong>{x.front}</strong><span>{x.problem}</span></div><span className="arrow">→</span><div className="node orange"><strong>{x.component}</strong><span>{x.cause||'Causa não confirmada'}</span></div><span className="arrow">→</span><div className="node blue"><strong>{x.evidence||'Dado necessário'}</strong><span>{x.impact?fmtMoney(x.impact):x.risk_value?`${fmtMoney(x.risk_value)} risco`:'sem R$ confiável'}</span></div></div>)}</div></Panel>
+  <Panel className="span-6" title="Árvore de causas" subtitle="KPI → componente → ofensor → causa/evidência → impacto." tag="EVIDÊNCIA" icon="⌘"><ValidatedCausalTree model={data.causal_model}/></Panel>
   <Panel className="span-4" title="Pareto de problemas" subtitle="Impacto financeiro direto por problema." icon="▮"><HorizontalBars data={priced} dataKey="impact" nameKey="problem"/></Panel>
-  <Panel className="span-4" title="Matriz Impacto × Esforço" subtitle="Priorização das ações monetizadas." tag="QUADRANTES" icon="◎"><MatrixChart data={matrix}/><div className="matrix-note">Impacto vem do motor; esforço é classificação de ação e permanece sujeito à validação executiva.</div></Panel>
+  <Panel className="span-4" title="Matriz Impacto × Esforço" subtitle="Quick Wins, Grandes Projetos, Melhorias Incrementais e Projetos Estruturantes." tag="4 QUADRANTES" icon="◎"><MatrixChart data={matrix} impactSplit={data.matrix?.impact_split} effortSplit={data.matrix?.effort_split||2.5}/><QuadrantSummary matrix={data.matrix}/><div className="matrix-note">Impacto vem do motor; esforço/horizonte classificam a ação. Projetos estruturantes concentram maior esforço e/ou prazo.</div></Panel>
   <Panel className="span-4" title="Quick-wins — até 90 dias" subtitle="Baixo esforço e evidência disponível." icon="⚡"><div className="alert-list">{(data.quickwins||[]).slice(0,6).map((x,i)=><div className="alert" key={i}><span className="alert-dot good-dot">{i+1}</span><div><b>{x.problem}</b><span>{x.evidence}</span></div><strong>{x.impact?fmtMoney(x.impact):`${fmtMoney(x.risk_value)} risco`}</strong></div>)}</div></Panel>
   <Panel className="span-4" title="Ganho por horizonte" subtitle="Até 90 dias, 3–6 meses e 6–12 meses." icon="▦"><div className="horizon-grid">{(data.horizons||[]).map((x,i)=><div className="horizon-card" key={i}><span>{x.horizon}</span><strong>{fmtMoney(x.impact)}</strong><small>{fmtNumber(x.problems)} problemas · risco {fmtMoney(x.risk)}</small></div>)}</div></Panel>
   <Panel className="span-4" title="Principais insights" subtitle="Leituras derivadas dos dados e da árvore causal." icon="◆"><AnalysisList items={data.insights||[]}/></Panel>
@@ -248,6 +268,29 @@ function Alavancas({data,plant}){
 }
 function Lever({k,label,unit,current,target,setTargets}){return <div className="lever-card"><label><span>{label}</span><small>{unit}</small></label><div className="lever-flow"><div><span>Atual</span><strong>{typeof current==='number'?fmtNumber(current,current<2?2:0):'—'}</strong></div><b>→</b><div><span>Meta</span><input type="number" step="any" value={target??''} onChange={e=>setTargets(s=>({...s,[k]:Number(e.target.value)}))}/></div></div></div>}
 function Driver({label,k,cur,value,setTargets}){return <div className="driver-card"><b>{label}</b><input type="number" step="0.001" min="0" max="1" value={value??''} onChange={e=>setTargets(s=>({...s,[k]:Number(e.target.value)}))}/><small>Atual {fmtPct(cur)} → Meta {fmtPct(value)}</small></div>}
+
+
+function PlanoAcao({data,plant}){
+ const storageKey=`ip_action_plan_${plant}`; const [actions,setActions]=useState(data.actions||[])
+ useEffect(()=>{try{const saved=window.localStorage.getItem(storageKey);if(saved){const parsed=JSON.parse(saved);if(Array.isArray(parsed))setActions(parsed);else setActions(data.actions||[])}else setActions(data.actions||[])}catch{setActions(data.actions||[])}},[storageKey,JSON.stringify(data.actions||[])])
+ useEffect(()=>{try{window.localStorage.setItem(storageKey,JSON.stringify(actions))}catch{}},[storageKey,actions])
+ const change=(id,key,value)=>setActions(a=>a.map(x=>x.id===id?{...x,[key]:value}:x)); const add=()=>setActions(a=>[...a,{id:`A${String(a.length+1).padStart(2,'0')}`,priority:a.length+1,front:'Manual',problem:'Nova ação',action:'Descrever ação',horizon:'Até 90 dias',due:'30 dias',owner:'A definir',status:'Planejada',potential:0,risk_value:0,captured:0,source_path:'/diagnostico'}])
+ const potential=actions.reduce((a,x)=>a+Number(x.potential||0),0),captured=actions.reduce((a,x)=>a+Number(x.captured||0),0),done=actions.filter(x=>x.status==='Concluída').length
+ return <><div className="kpi-grid cols-4"><KpiCard label="Ações no plano" value={fmtNumber(actions.length)} foot={`${done} concluídas`} icon="◇"/><KpiCard label="Valor potencial" value={fmtMoney(potential)} foot="não é captura realizada" icon="▮"/><KpiCard label="Valor capturado" value={fmtMoney(captured)} foot="registrado após evidência" state="good" icon="✓"/><KpiCard label="Captura / potencial" value={potential?fmtPct(captured/potential):'—'} foot="acompanhamento executivo" icon="◎"/></div><Panel title="Plano de Ação" subtitle="Prioridade → responsável → prazo → status → valor capturado." tag="EDITÁVEL" icon="◇"><div className="button-row"><button className="control-btn control-primary" onClick={add}>+ Nova ação</button><Link className="control-btn" href={`/diagnostico?plant=${encodeURIComponent(plant)}`}>Voltar ao Diagnóstico</Link></div><div className="action-table-wrap"><table className="action-table"><thead><tr><th>#</th><th>Ação</th><th>Frente</th><th>Responsável</th><th>Prazo</th><th>Status</th><th>Potencial</th><th>Capturado</th><th>Origem</th></tr></thead><tbody>{actions.map((x,i)=><tr key={x.id||i}><td>{i+1}</td><td><textarea value={x.action||''} onChange={e=>change(x.id,'action',e.target.value)}/></td><td>{x.front}</td><td><input value={x.owner||''} onChange={e=>change(x.id,'owner',e.target.value)}/></td><td><input value={x.due||''} onChange={e=>change(x.id,'due',e.target.value)}/></td><td><select value={x.status||'Planejada'} onChange={e=>change(x.id,'status',e.target.value)}><option>Planejada</option><option>Em andamento</option><option>Bloqueada</option><option>Concluída</option></select></td><td>{fmtMoney(x.potential)}</td><td><input type="number" min="0" value={x.captured??0} onChange={e=>change(x.id,'captured',Number(e.target.value||0))}/></td><td><Drill href={x.source_path}>Abrir</Drill></td></tr>)}</tbody></table></div></Panel><div className="footer-note">O plano é persistido localmente no navegador nesta build. Persistência multiusuário/DB continua como etapa de produto.</div></>
+}
+
+function Agente({data,plant}){
+ const [question,setQuestion]=useState(''),[history,setHistory]=useState([]),[busy,setBusy]=useState(false),[error,setError]=useState('')
+ async function ask(q=question){const text=String(q||'').trim();if(!text||busy)return;setBusy(true);setError('');try{const r=await getJSON('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({plant,question:text})});setHistory(h=>[...h,{q:text,...r}]);setQuestion('')}catch(e){setError(String(e))}finally{setBusy(false)}}
+ return <><Panel title="Agente de Performance" subtitle="Pergunte sobre KPI, causa/evidência, impacto financeiro e ação recomendada." tag="MOTOR ANALÍTICO" icon="✦"><div className="agent-starters">{(data.starter_questions||[]).map((q,i)=><button key={i} className="control-btn" onClick={()=>ask(q)}>{q}</button>)}</div><div className="agent-input"><input value={question} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')ask()}} placeholder="Ex.: Onde está o maior impacto financeiro e o que devo fazer?"/><button className="control-btn control-primary" onClick={()=>ask()} disabled={busy}>{busy?'Analisando…':'Perguntar'}</button></div>{error&&<div className="data-note bad-text">{error}</div>}</Panel><div className="agent-history">{history.length===0?<Panel title="Contexto atual" subtitle="O agente usa a mesma base ativa e o mesmo motor das telas." icon="▤"><ExecutiveConclusion data={data.executive_context}/><AnalysisList items={(data.top_problems||[]).slice(0,3).map(x=>({title:x.problem,text:`${x.front} · ${x.impact?fmtMoney(x.impact):fmtMoney(x.risk_value)} · ${x.evidence||'evidência a confirmar'}`}))}/></Panel>:history.map((h,i)=><Panel key={i} title={h.q} subtitle={`${h.plant} · ${h.mode}`} tag="RESPOSTA" icon="✦"><div className="agent-answer"><p>{h.answer}</p>{h.evidence?.length>0&&<div><strong>Evidências</strong><ul>{h.evidence.map((x,j)=><li key={j}>{x}</li>)}</ul></div>}{h.actions?.length>0&&<div><strong>Ações sugeridas</strong><ol>{h.actions.map((x,j)=><li key={j}>{x}</li>)}</ol></div>}<div className="button-row">{h.paths?.map((x,j)=><Drill key={j} href={`${x}?plant=${encodeURIComponent(plant)}`}>Aprofundar</Drill>)}</div></div></Panel>)}</div></>
+}
+
+function Relatorios({data,plant}){
+ const [selected,setSelected]=useState(null); const pkg=selected?data.packages?.find(x=>x.id===selected):null; const payload=selected?data.payloads?.[selected]:null
+ function download(id){const pack=data.packages?.find(x=>x.id===id),content=data.payloads?.[id];if(!pack||!content)return;const blob=new Blob([JSON.stringify({title:pack.title,plant,generated_at:new Date().toISOString(),source:data.generated_from,data:content},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`industrial-performance-${id}-${plant.replaceAll(' ','-')}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),500)}
+ return <><div className="report-grid">{(data.packages||[]).map(x=><article className="report-card" key={x.id}><IconBox>▤</IconBox><h3>{x.title}</h3><p>{x.description}</p><div className="report-sections">{x.sections?.map((s,i)=><span key={i}>{s}</span>)}</div><div className="button-row"><button className="control-btn control-primary" onClick={()=>setSelected(x.id)}>Gerar prévia</button><button className="control-btn" onClick={()=>download(x.id)}>Baixar dados</button></div></article>)}</div>{pkg&&<Panel title={`Prévia — ${pkg.title}`} subtitle={`${plant} · ${data.generated_from}`} tag="GERADO DA BASE ATIVA" icon="▤"><div className="button-row report-actions"><button className="control-btn control-primary" onClick={()=>window.print()}>Imprimir / salvar PDF</button><button className="control-btn" onClick={()=>download(pkg.id)}>Baixar dados JSON</button></div><div className="report-preview"><h2>{pkg.title}</h2><p>Planta: <b>{plant}</b></p><p>Seções: {pkg.sections?.join(' · ')}</p><pre>{JSON.stringify(payload,null,2)}</pre></div></Panel>}</>
+}
+
 
 function CentralDados({data}){
  const [file,setFile]=useState(null),[upload,setUpload]=useState(null),[message,setMessage]=useState('')
