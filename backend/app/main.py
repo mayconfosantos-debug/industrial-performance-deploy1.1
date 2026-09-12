@@ -5,9 +5,9 @@ from pydantic import BaseModel
 import shutil, uuid
 import pandas as pd
 
-from .data import dashboard, load_book, active_path, set_active, simulate, central_data, DATA_DIR, SHEETS
+from .data import dashboard, dashboard_from_book, load_book, active_path, set_active, simulate, central_data, DATA_DIR, SHEETS
 
-app = FastAPI(title="Industrial Performance API", version="1.0.0")
+app = FastAPI(title="Industrial Performance API", version="1.0.5")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 class SimulationRequest(BaseModel):
@@ -16,13 +16,22 @@ class SimulationRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status":"ok","version":"1.0.0","active_base":active_path().name}
+    return {"status":"ok","version":"1.0.5","active_base":active_path().name}
 
 @app.get("/api/plants")
 def plants():
     b=load_book(); df=b.get("PCP")
     vals=[] if df is None or df.empty else sorted(df["Fabrica"].dropna().astype(str).unique().tolist())
     return {"plants":vals,"active_base":active_path().name}
+
+
+@app.get("/api/bootstrap/{screen}")
+def bootstrap(screen: str, plant: str="Planta Campinas"):
+    book=load_book()
+    df=book.get("PCP")
+    vals=[] if df is None or df.empty else sorted(df["Fabrica"].dropna().astype(str).unique().tolist())
+    selected=plant if plant in vals else (vals[0] if vals else plant)
+    return {"plants":vals,"plant":selected,"active_base":active_path().name,"data":dashboard_from_book(screen, selected, book)}
 
 @app.get("/api/dashboard/{screen}")
 def get_dashboard(screen: str, plant: str="Planta Campinas"):
