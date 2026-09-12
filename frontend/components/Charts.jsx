@@ -10,14 +10,52 @@ export function HorizontalBars({data,dataKey='impact',nameKey='name',color=C.red
 export function HealthDonut({score,status=[]}){ const counts={good:status.filter(x=>x.state==='good').length,warn:status.filter(x=>x.state==='warn').length,bad:status.filter(x=>x.state==='bad').length}; const data=[{name:'Saudável',value:counts.good,color:C.green},{name:'Atenção',value:counts.warn,color:C.yellow},{name:'Crítico',value:counts.bad,color:C.red}].filter(x=>x.value>0); return <div className="health-wrap"><div className="donut"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={data.length?data:[{value:1,color:C.muted}]} dataKey="value" innerRadius="67%" outerRadius="91%" stroke="none">{(data.length?data:[{color:C.muted}]).map((e,i)=><Cell key={i} fill={e.color}/>)}</Pie></PieChart></ResponsiveContainer><div className="donut-center"><strong>{Math.round(score||0)}</strong><span>Saúde</span></div></div><div className="health-counts"><div><strong className="good">{counts.good}</strong><span>acima/meta</span></div><div><strong className="warn">{counts.warn}</strong><span>atenção</span></div><div><strong className="bad">{counts.bad}</strong><span>críticos</span></div></div></div> }
 export function OeePlantChart({data=[]}){
  const rows=(Array.isArray(data)?data:[]).filter(Boolean); if(!rows.length)return <div className="chart-empty">Sem dados de OEE por planta.</div>
- const W=900,H=300,padL=55,padR=16,padT=18,padB=55,plotW=W-padL-padR,plotH=H-padT-padB; const groupW=plotW/rows.length; const bw=Math.max(8,Math.min(22,groupW/6));
- const y=v=>padT+plotH*(1-Math.max(0,Math.min(1,Number(v)||0))); const series=[['oee',C.blue],['availability',C.cyan],['performance',C.orange],['quality',C.purple]];
- return <div className="chart safe-svg-chart"><svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="OEE por planta">{[0,.25,.5,.75,1].map((v,i)=><g key={i}><line x1={padL} x2={W-padR} y1={y(v)} y2={y(v)} stroke={C.grid}/><text x={padL-8} y={y(v)+4} textAnchor="end" fill="#8ea5b6" fontSize="10">{Math.round(v*100)}%</text></g>)}<line x1={padL} x2={W-padR} y1={y(.85)} y2={y(.85)} stroke={C.cyan} strokeDasharray="6 5"/>{rows.map((r,idx)=>{const cx=padL+groupW*(idx+.5);return <g key={r.plant||idx}>{series.map(([k,color],j)=>{const v=Math.max(0,Math.min(1,Number(r?.[k])||0));const x=cx+(j-1.5)*(bw+3);return <rect key={k} x={x-bw/2} y={y(v)} width={bw} height={Math.max(1,padT+plotH-y(v))} rx="3" fill={color}/>})}<text x={cx} y={H-28} textAnchor="middle" fill="#a9bdc9" fontSize="10">{String(r.plant||'').replace('Planta ','')}</text><text x={cx} y={y(r.oee)-7} textAnchor="middle" fill="#fff" fontSize="10" fontWeight="700">{Math.round((Number(r.oee)||0)*100)}%</text></g>})}<g transform={`translate(${padL},${H-8})`}>{series.map(([k,color],i)=><g key={k} transform={`translate(${i*150},0)`}><rect width="9" height="9" rx="2" fill={color}/><text x="14" y="8" fill="#8ea5b6" fontSize="9">{{oee:'OEE',availability:'Disponibilidade',performance:'Performance',quality:'Qualidade'}[k]}</text></g>)}</g></svg></div>
+ const W=860,H=300,padL=50,padR=18,padT=48,padB=48,plotW=W-padL-padR,plotH=H-padT-padB; const groupW=plotW/rows.length; const bw=Math.max(12,Math.min(25,groupW/5.8));
+ const y=v=>padT+plotH*(1-Math.max(0,Math.min(1,Number(v)||0)));
+ // A tela validada trabalha com barras agrupadas e linguagem predominantemente azul.
+ const series=[['oee','#1a63c7','OEE'],['availability','#65b8ff','Disponibilidade'],['performance','#318bf0','Performance'],['quality','#a4cfff','Qualidade']];
+ return <div className="chart safe-svg-chart multiplant-oee-chart"><svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="OEE por planta">
+   <g transform={`translate(${padL},18)`}>{series.map(([k,color,label],i)=><g key={k} transform={`translate(${i*155},0)`}><rect width="10" height="10" rx="2" fill={color}/><text x="15" y="9" fill="#9fb4c2" fontSize="10">{label}</text></g>)}<g transform={`translate(620,0)`}><line x1="0" x2="22" y1="5" y2="5" stroke={C.cyan} strokeWidth="2" strokeDasharray="6 4"/><text x="28" y="9" fill="#9fb4c2" fontSize="10">Meta OEE 85%</text></g></g>
+   {[0,.25,.5,.75,1].map((v,i)=><g key={i}><line x1={padL} x2={W-padR} y1={y(v)} y2={y(v)} stroke={C.grid}/><text x={padL-8} y={y(v)+4} textAnchor="end" fill="#8ea5b6" fontSize="10">{Math.round(v*100)}%</text></g>)}
+   <line x1={padL} x2={W-padR} y1={y(.85)} y2={y(.85)} stroke={C.cyan} strokeWidth="2" strokeDasharray="6 5"/>
+   {rows.map((r,idx)=>{const cx=padL+groupW*(idx+.5);return <g key={r.plant||idx}>{series.map(([k,color],j)=>{const v=Math.max(0,Math.min(1,Number(r?.[k])||0));const x=cx+(j-1.5)*(bw+4);return <rect key={k} x={x-bw/2} y={y(v)} width={bw} height={Math.max(1,padT+plotH-y(v))} rx="3" fill={color}/>})}<text x={cx} y={H-18} textAnchor="middle" fill="#a9bdc9" fontSize="10">{String(r.plant||'').replace('Planta ','')}</text><text x={cx-1.5*(bw+4)} y={Math.max(padT+10,y(r.oee)-7)} textAnchor="middle" fill="#fff" fontSize="10" fontWeight="800">{Math.round((Number(r.oee)||0)*100)}%</text></g>})}
+ </svg></div>
 }
 
-export function SimpleBars({data=[],nameKey='plant',valueKey='production',color=C.blue}){
- const rows=(Array.isArray(data)?data:[]).filter(Boolean); const max=Math.max(...rows.map(x=>Math.abs(Number(x?.[valueKey])||0)),1)
- return <div className="safe-bars">{rows.map((r,i)=>{const v=Number(r?.[valueKey])||0;return <div className="safe-bar-row" key={r?.[nameKey]||i}><span>{String(r?.[nameKey]??'—').replace('Planta ','')}</span><div className="safe-bar-track"><i style={{width:`${Math.max(2,Math.abs(v)/max*100)}%`,background:color}}/></div><b>{Math.abs(v)>=1e6?`${(v/1e6).toLocaleString('pt-BR',{maximumFractionDigits:2})} mi`:Math.abs(v)>=1e3?`${(v/1e3).toLocaleString('pt-BR',{maximumFractionDigits:0})} mil`:v.toLocaleString('pt-BR',{maximumFractionDigits:2})}</b></div>})}</div>
+export function SimpleBars({data=[],nameKey='plant',valueKey='production',color=C.blue,statusMode=false}){
+ const rows=(Array.isArray(data)?data:[]).filter(Boolean); const vals=rows.map(x=>Math.abs(Number(x?.[valueKey])||0)); const max=Math.max(...vals,1)
+ const colorFor=(v)=>{if(!statusMode)return color; if(rows.length<=1)return C.green; const sorted=[...vals].sort((a,b)=>a-b),lo=sorted[0],hi=sorted[sorted.length-1]; if(v===hi&&hi>lo)return C.red;if(v===lo)return C.green;return C.yellow}
+ const format=v=>Math.abs(v)>=1e6?`${(v/1e6).toLocaleString('pt-BR',{maximumFractionDigits:2})} mi`:Math.abs(v)>=1e3?`${(v/1e3).toLocaleString('pt-BR',{maximumFractionDigits:0})} mil`:v.toLocaleString('pt-BR',{maximumFractionDigits:2})
+ return <div className="safe-bars">{rows.map((r,i)=>{const v=Number(r?.[valueKey])||0;return <div className="safe-bar-row" key={r?.[nameKey]||i}><span>{String(r?.[nameKey]??'—').replace('Planta ','')}</span><div className="safe-bar-track"><i style={{width:`${Math.max(4,Math.abs(v)/max*100)}%`,background:colorFor(Math.abs(v))}}/></div><b>{format(v)}</b></div>})}</div>
+}
+
+const GEO_CATALOG={
+ 'Planta São Paulo':{name:'São Paulo',lat:-23.5505,lon:-46.6333},
+ 'São Paulo':{name:'São Paulo',lat:-23.5505,lon:-46.6333},
+ 'Planta Campinas':{name:'Campinas',lat:-22.9056,lon:-47.0608},
+ 'Campinas':{name:'Campinas',lat:-22.9056,lon:-47.0608},
+ 'Planta Curitiba':{name:'Curitiba',lat:-25.4284,lon:-49.2733},
+ 'Curitiba':{name:'Curitiba',lat:-25.4284,lon:-49.2733},
+ 'Planta Manaus':{name:'Manaus',lat:-3.1190,lon:-60.0217},
+ 'Manaus':{name:'Manaus',lat:-3.1190,lon:-60.0217},
+ 'Planta Recife':{name:'Recife',lat:-8.0476,lon:-34.8770},
+ 'Recife':{name:'Recife',lat:-8.0476,lon:-34.8770},
+ 'Planta Porto Alegre':{name:'Porto Alegre',lat:-30.0346,lon:-51.2177},
+ 'Porto Alegre':{name:'Porto Alegre',lat:-30.0346,lon:-51.2177},
+}
+export function PlantMap({data=[],locations=[]}){
+ const src=(Array.isArray(locations)&&locations.length?locations:(Array.isArray(data)?data:[]).map(r=>({...GEO_CATALOG[r?.plant],plant:r?.plant,oee:r?.oee})).filter(x=>Number.isFinite(x.lat)&&Number.isFinite(x.lon)))
+ if(!src.length)return <div className="chart-empty">Localização das plantas não disponível.</div>
+ const W=520,H=310,lonMin=-74,lonMax=-34,latMin=-34,latMax=6; const px=lon=>58+(Number(lon)-lonMin)/(lonMax-lonMin)*385; const py=lat=>24+(latMax-Number(lat))/(latMax-latMin)*255
+ const outline=[[-72,-7],[-68,-2],[-61,4],[-53,4],[-49,1],[-46,-1],[-43,-2],[-38,-4],[-35,-7],[-36,-11],[-39,-14],[-39,-18],[-42,-22],[-44,-24],[-48,-29],[-53,-33],[-57,-31],[-58,-27],[-61,-23],[-58,-19],[-60,-15],[-57,-11],[-62,-10],[-66,-11],[-70,-9]]
+ const pointColor=o=>Number(o)>=.80?C.green:Number(o)>=.70?C.yellow:C.red
+ return <div className="plant-map"><svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Mapa das plantas">
+   <path d={`M ${outline.map(([lon,lat])=>`${px(lon)} ${py(lat)}`).join(' L ')} Z`} fill="#163b55" stroke="#2b607e" strokeWidth="2"/>
+   <path d={`M ${px(-60)} ${py(4)} L ${px(-58)} ${py(-31)}`} stroke="#1d4c68" strokeWidth="1" opacity=".6"/>
+   <path d={`M ${px(-50)} ${py(1)} L ${px(-53)} ${py(-32)}`} stroke="#1d4c68" strokeWidth="1" opacity=".5"/>
+   {src.map((r,i)=>{const x=px(r.lon),y=py(r.lat),name=r.name||String(r.plant||'').replace('Planta ','');return <g key={r.plant||name||i}><circle cx={x} cy={y} r="9" fill={pointColor(r.oee)} stroke="#e7f4fb" strokeWidth="2"/><circle cx={x} cy={y} r="3" fill="#fff"/><text x={x+12} y={y+4} fill="#e8f1f5" fontSize="11" fontWeight="700">{name}</text></g>})}
+   <g transform="translate(365 25)"><text x="0" y="0" fill="#9cb2c0" fontSize="10" fontWeight="700">OEE</text><circle cx="5" cy="18" r="5" fill={C.green}/><text x="15" y="22" fill="#9cb2c0" fontSize="9">≥ 80%</text><circle cx="5" cy="36" r="5" fill={C.yellow}/><text x="15" y="40" fill="#9cb2c0" fontSize="9">70–79%</text><circle cx="5" cy="54" r="5" fill={C.red}/><text x="15" y="58" fill="#9cb2c0" fontSize="9">&lt; 70%</text></g>
+ </svg></div>
 }
 
 export function OeeTrend({data}){ return <div className="chart"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={data}><CartesianGrid stroke={C.grid} vertical={false}/><XAxis dataKey="period" tick={tick}/><YAxis tick={tick} domain={[0,1]} tickFormatter={v=>`${Math.round(v*100)}%`}/><Tooltip content={<ChartTip/>}/><Legend/><ReferenceLine y={.85} stroke={C.cyan} strokeDasharray="5 5"/><Bar dataKey="oee" name="OEE" fill={C.blue}/><Line dataKey="availability" name="Disponibilidade" stroke={C.green}/><Line dataKey="performance" name="Performance" stroke={C.orange}/><Line dataKey="quality" name="Qualidade" stroke={C.purple}/></ComposedChart></ResponsiveContainer></div> }
