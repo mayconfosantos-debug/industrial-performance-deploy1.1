@@ -949,7 +949,21 @@ def multiplant(book):
             d=min(declining,key=lambda x:x['production_change'])
             insights.append({'title':'Deterioração de volume','text':f"{d['plant']} apresenta a maior queda de produção no último mês vs. anterior ({d['production_change']*100:.1f}%)."})
     insights.append({'title':'Regra de consolidação','text':'Receita, EBITDA e produção são somados no grupo. OEE permanece exclusivamente planta a planta; não existe OEE médio/consolidado.'})
-    return {'cards':{'plants':len(plants),'worst':worst,'best':best,'production':total_prod,'revenue':total_rev,'ebitda':total_ebitda},'plants':rows,'evolution':evolution,'insights':insights,'recommendations':recs,'geo_available':False}
+    # Coordenadas do cadastro demo aprovado v0.9.1.1. Só são usadas quando o nome da planta identifica inequivocamente a cidade.
+    geo_catalog={
+        'Planta São Paulo':{'name':'São Paulo','lat':-23.5505,'lon':-46.6333},
+        'Planta Campinas':{'name':'Campinas','lat':-22.9056,'lon':-47.0608},
+        'Planta Curitiba':{'name':'Curitiba','lat':-25.4284,'lon':-49.2733},
+        'Planta Manaus':{'name':'Manaus','lat':-3.1190,'lon':-60.0217},
+        'Planta Recife':{'name':'Recife','lat':-8.0476,'lon':-34.8770},
+        'Planta Porto Alegre':{'name':'Porto Alegre','lat':-30.0346,'lon':-51.2177},
+    }
+    locations=[]
+    by_plant={r['plant']:r for r in rows}
+    for p in plants:
+        if p in geo_catalog:
+            locations.append({'plant':p,'oee':by_plant.get(p,{}).get('oee'),**geo_catalog[p]})
+    return {'cards':{'plants':len(plants),'worst':worst,'best':best,'production':total_prod,'revenue':total_rev,'ebitda':total_ebitda},'plants':rows,'evolution':evolution,'insights':insights,'recommendations':recs,'geo_available':len(locations)>0,'locations':locations}
 
 
 def pcp_screen(book, plant):
@@ -1311,7 +1325,7 @@ def cockpit(book, plant):
     series=[]
     for row in oee_month:
         m=pd.to_datetime(row['period'],format='%b/%y'); pg=p2[p2['_m']==m] if not p2.empty else pd.DataFrame(); lg=l2[l2['_m']==m] if not l2.empty else pd.DataFrame(); dg=dre[dre['_m']==m] if not dre.empty else pd.DataFrame()
-        series.append({'period':row['period'],'oee':row['oee'],'adherence':_ratio(pg['Produzido'].sum(),pg['MRP_Plano'].sum()) if not pg.empty else None,'otif':_ratio(lg['Pedidos_OTIF'].sum(),lg['Pedidos_Total'].sum()) if not lg.empty else None,'margin':_ratio(dg['EBITDA_Gerencial'].sum(),dg['Receita_Liquida'].sum()) if not dg.empty else None})
+        series.append({'period':row['period'],'oee':row['oee'],'availability':row.get('availability'),'performance':row.get('performance'),'quality':row.get('quality'),'adherence':_ratio(pg['Produzido'].sum(),pg['MRP_Plano'].sum()) if not pg.empty else None,'otif':_ratio(lg['Pedidos_OTIF'].sum(),lg['Pedidos_Total'].sum()) if not lg.empty else None,'margin':_ratio(dg['EBITDA_Gerencial'].sum(),dg['Receita_Liquida'].sum()) if not dg.empty else None})
     diag=diagnosis_screen(book,plant); opps=[{'name':x['problem'],'pillar':x['front'],'impact':x.get('impact',0),'evidence':x.get('evidence'),'path':x.get('path')} for x in diag.get('priced_problems',[])[:5]]
     alerts=[]
     screen_map={'OEE':'/oee','PCP':'/pcp','Capacidade':'/capacidade','Materiais':'/materiais','OTIF':'/logistica'}

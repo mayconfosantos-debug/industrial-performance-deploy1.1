@@ -7,7 +7,7 @@ import pandas as pd
 
 from .data import dashboard, dashboard_from_book, load_book, active_path, set_active, simulate, central_data, agent_query, DATA_DIR, SHEETS
 
-app = FastAPI(title="Industrial Performance API", version="1.0.6")
+app = FastAPI(title="Industrial Performance API", version="1.0.7")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 class SimulationRequest(BaseModel):
@@ -16,7 +16,7 @@ class SimulationRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status":"ok","version":"1.0.6","active_base":active_path().name}
+    return {"status":"ok","version":"1.0.7","active_base":active_path().name}
 
 @app.get("/api/plants")
 def plants():
