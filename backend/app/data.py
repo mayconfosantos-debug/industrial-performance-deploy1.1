@@ -812,7 +812,7 @@ def central_data(book):
 
 def dashboard_from_book(screen: str, plant: str, book: dict[str, pd.DataFrame]):
     mapping={
-        "cockpit":lambda:cockpit(book,plant),"multiplantas":lambda:multiplant(book),"pcp":lambda:pcp_screen(book,plant),"oee":lambda:oee_screen(book,plant),"capacidade":lambda:capacity_screen(book,plant),"materiais":lambda:materials_screen(book,plant),"logistica":lambda:logistics_screen(book,plant),"financas":lambda:finance_screen(book,plant),"diagnostico":lambda:diagnosis_screen(book,plant),"alavancas":lambda:levers_screen(book,plant),"central-dados":lambda:central_data(book)
+        "cockpit":lambda:cockpit(book,plant),"multiplantas":lambda:multiplant(book),"pcp":lambda:pcp_screen(book,plant),"oee":lambda:oee_screen(book,plant),"capacidade":lambda:capacity_screen(book,plant),"materiais":lambda:materials_screen(book,plant),"logistica":lambda:logistics_screen(book,plant),"financas":lambda:finance_screen(book,plant),"diagnostico":lambda:diagnosis_screen(book,plant),"alavancas":lambda:levers_screen(book,plant),"plano-acao":lambda:action_plan_screen(book,plant),"agente":lambda:agent_screen(book,plant),"relatorios":lambda:reports_screen(book,plant),"central-dados":lambda:central_data(book)
     }
     if screen not in mapping: return {"status":"planned","screen":screen}
     return mapping[screen]()
@@ -1547,3 +1547,175 @@ def simulate(book, plant, targets: dict[str,float]):
     d['recommendations']=recs
     d['drilldowns']=[{'level':'Alavanca','offender':x.get('label'),'evidence':'Impacto reconciliado na bridge do cenário','impact':x.get('impact'),'impact_label':'Δ EBITDA','path':_diag_path(plant,focus=str(x.get('label')))} for x in items[:10]]
     return d
+
+
+# ============================================================================
+# v1.0.6 — Functional Closure / Runtime Hardening
+# Restores the validated causal-tree structure, explicit Impact×Effort
+# quadrants and makes Plano de Ação, Agente de Performance and Relatórios
+# operational. Business formulas remain those of the frozen analytical motor.
+# ============================================================================
+
+_v105_diagnosis_screen = diagnosis_screen
+
+
+def diagnosis_screen(book, plant):
+    d=_v105_diagnosis_screen(book,plant)
+    o=oee_screen(book,plant)
+    k=o.get('kpis',{}); t=o.get('targets',{})
+    problems=d.get('problems',[])
+    oee_problems=[x for x in problems if x.get('front')=='Produção & OEE']
+    total_oee_impact=sum(float(x.get('impact',0) or 0) for x in oee_problems)
+    branches=[]
+    sources={
+        'Disponibilidade':o.get('availability_offenders',[]),
+        'Performance':o.get('performance_offenders',[]),
+        'Qualidade':o.get('quality_offenders',[]),
+    }
+    keymap={'Disponibilidade':'availability','Performance':'performance','Qualidade':'quality'}
+    for component in ['Disponibilidade','Performance','Qualidade']:
+        p=next((x for x in oee_problems if x.get('component')==component),None)
+        offenders=sources[component] or []
+        top=offenders[0] if offenders else None
+        kk=keymap[component]
+        cur=k.get(kk); target=t.get(kk)
+        gap=max(float(target or 0)-float(cur or 0),0) if cur is not None else None
+        evidence=[]
+        for x in offenders[:4]:
+            label=x.get('cause') or x.get('equipment') or x.get('sku') or x.get('line') or 'Ofensor evidenciado'
+            ev=x.get('evidence') or ''
+            share=x.get('share') or x.get('pct') or x.get('percentage')
+            impact=x.get('impact')
+            evidence.append({'label':str(label),'evidence':str(ev),'share':share,'impact':impact})
+        branches.append({
+            'component':component,
+            'current':cur,
+            'target':target,
+            'gap':gap,
+            'impact':float(p.get('impact',0) or 0) if p else 0,
+            'offender':(p.get('cause') if p else None) or (top.get('cause') if top else None) or 'Dado necessário',
+            'evidence':(p.get('evidence') if p else None) or (top.get('evidence') if top else None) or 'Evidência não disponível',
+            'evidence_items':evidence,
+            'path':'/oee'
+        })
+    d['causal_model']={
+        'root':{
+            'label':'OEE abaixo da meta',
+            'current':k.get('oee'),
+            'target':t.get('oee'),
+            'gap':max(float(t.get('oee') or 0)-float(k.get('oee') or 0),0),
+            'impact':total_oee_impact,
+        },
+        'branches':branches,
+        'note':'Árvore causal usa evidência registrada. Causa sem suporte permanece como dado necessário/hipótese.'
+    }
+    # Explicit matrix quadrants. The boundary is deterministic and visible:
+    # effort <=2 = low effort; financial median separates high/low impact.
+    priced=[x for x in d.get('priced_problems',[]) if float(x.get('impact',0) or 0)>0]
+    impacts=sorted(float(x.get('impact',0) or 0) for x in priced)
+    median=impacts[len(impacts)//2] if impacts else 0
+    matrix=[]
+    counts={'Quick Wins':0,'Grandes Projetos':0,'Melhorias Incrementais':0,'Projetos Estruturantes':0}
+    values={k:0.0 for k in counts}
+    for x in priced:
+        effort=float(x.get('effort',3) or 3); impact=float(x.get('impact',0) or 0)
+        low_effort=effort<=2.0; high_impact=impact>=median if median else True
+        if low_effort and high_impact: q='Quick Wins'
+        elif (not low_effort) and high_impact: q='Grandes Projetos'
+        elif low_effort and not high_impact: q='Melhorias Incrementais'
+        else: q='Projetos Estruturantes'
+        counts[q]+=1; values[q]+=impact
+        matrix.append({'name':x.get('problem'),'front':x.get('front'),'impact':impact,'effort':effort,'quadrant':q,'horizon':x.get('horizon'),'action':x.get('action'),'path':x.get('path')})
+    d['matrix']={'items':matrix,'impact_split':median,'effort_split':2.5,'counts':counts,'values':values}
+    return d
+
+
+def action_plan_screen(book, plant):
+    diag=diagnosis_screen(book,plant)
+    actions=[]
+    for i,x in enumerate(diag.get('recommendations',[])[:12],1):
+        horizon=x.get('horizon') or 'Até 90 dias'
+        due='30 dias' if i<=2 else '60 dias' if horizon=='Até 90 dias' else '120 dias' if horizon=='3–6 meses' else '270 dias'
+        actions.append({
+            'id':f'A{i:02d}','priority':i,'front':x.get('front'),'problem':x.get('problem'),'action':x.get('action'),
+            'horizon':horizon,'due':due,'owner':'A definir','status':'Planejada','potential':float(x.get('impact',0) or 0),
+            'risk_value':float(x.get('risk_value',0) or 0),'captured':0.0,'source_path':x.get('path') or '/diagnostico'
+        })
+    return {
+        'plant':plant,
+        'summary':{
+            'actions':len(actions),
+            'potential':sum(x['potential'] for x in actions),
+            'captured':sum(x['captured'] for x in actions),
+            'quick':sum(1 for x in actions if x['horizon']=='Até 90 dias'),
+            'long_term':sum(1 for x in actions if x['horizon']!='Até 90 dias'),
+        },
+        'actions':actions,
+        'rules':['Valor potencial vem do Diagnóstico e não é valor capturado.','Valor capturado deve ser registrado após evidência de execução/resultado.','Receita em risco permanece separada de EBITDA/captura.']
+    }
+
+
+def reports_screen(book, plant):
+    cp=cockpit(book,plant); dg=diagnosis_screen(book,plant); fin=finance_screen(book,plant); o=oee_screen(book,plant); p=pcp_screen(book,plant); cap=capacity_screen(book,plant); mat=materials_screen(book,plant); log=logistics_screen(book,plant)
+    return {
+        'plant':plant,
+        'packages':[
+            {'id':'executivo','title':'Relatório Executivo','description':'Cockpit, principais gaps, impacto financeiro, conclusão e prioridades.','sections':['Cockpit Executivo','Diagnóstico','Recomendações 30/60/90']},
+            {'id':'operacao','title':'Relatório de Operações','description':'PCP, OEE, capacidade, ofensores e restrições.','sections':['PCP & Aderência','Produção & OEE','Capacidade']},
+            {'id':'supply-log','title':'Relatório Supply & Logística','description':'Materiais críticos, consumo, fornecedores, OTIF, rotas e pedidos em risco.','sections':['Materiais & Supply','Logística']},
+            {'id':'financeiro','title':'Relatório Financeiro Gerencial','description':'DRE Gerencial, bridge, estrutura de custos e pressões operacionais.','sections':['Finanças & DRE']},
+        ],
+        'payloads':{
+            'executivo':{'cockpit':cp,'diagnostico':dg},
+            'operacao':{'pcp':p,'oee':o,'capacidade':cap},
+            'supply-log':{'materiais':mat,'logistica':log},
+            'financeiro':{'financas':fin},
+        },
+        'generated_from':'Base ativa do Industrial Performance; mesmos cálculos das telas.'
+    }
+
+
+def _agent_answer(book, plant, question):
+    q=(question or '').strip().lower()
+    cp=cockpit(book,plant); dg=diagnosis_screen(book,plant); fin=finance_screen(book,plant); o=oee_screen(book,plant); p=pcp_screen(book,plant); mat=materials_screen(book,plant); log=logistics_screen(book,plant); cap=capacity_screen(book,plant)
+    paths=[]; evidence=[]; actions=[]
+    if any(w in q for w in ['oee','produção','producao','disponibilidade','performance','qualidade']):
+        k=o.get('kpis',{}); t=o.get('targets',{}); money=o.get('money',{})
+        comps=[('Disponibilidade',k.get('availability'),t.get('availability')),('Performance',k.get('performance'),t.get('performance')),('Qualidade',k.get('quality'),t.get('quality'))]
+        worst=max(comps,key=lambda z:max(float(z[2] or 0)-float(z[1] or 0),0))
+        answer=f"OEE de {_pct_text(k.get('oee'))} versus meta {_pct_text(t.get('oee'))}. O maior gap está em {worst[0]}: {max(float(worst[2] or 0)-float(worst[1] or 0),0)*100:.1f} p.p. O impacto direto identificado nos componentes é {_money_text(money.get('total'))}."
+        evidence=[f"{x.get('name')}: {_money_text(x.get('value'))}" for x in money.get('items',[])[:4]]; paths=['/oee','/diagnostico']; actions=['Abrir ofensores do componente crítico e confirmar causa/evidência.','Priorizar ações com impacto direto e medir captura.']
+    elif any(w in q for w in ['forecast','pcp','aderência','aderencia','wape','mape','bias']):
+        m=p.get('metrics',{}); top=(p.get('offenders') or [None])[0]
+        answer=f"PCP: aderência {_pct_text(m.get('adherence'))}, WAPE {_pct_text(m.get('wape'))}, MAPE {_pct_text(m.get('mape'))} e Bias {_pct_text(m.get('bias'))}." + (f" O principal SKU ofensor é {top.get('sku')}." if top else '')
+        evidence=[f"Forecast {m.get('forecast',0):,.0f} un",f"Plano {m.get('plan',0):,.0f} un",f"Produzido {m.get('produced',0):,.0f} un"]; paths=['/pcp','/diagnostico']; actions=['Separar erro de previsão de falha de execução.','Atacar SKUs que concentram WAPE e volume.']
+    elif any(w in q for w in ['logística','logistica','otif','frete','entrega','rota']):
+        k=log.get('kpis',{}); top=(log.get('causes') or [None])[0]
+        answer=f"Logística: OTIF {_pct_text(k.get('otif'))}, frete/un {_money_text(k.get('freight_unit'))}, receita em risco {_money_text(k.get('revenue_risk'))}." + (f" Principal causa: {top.get('cause')} ({_pct_text(top.get('share'))})." if top else '')
+        evidence=[f"Pedidos críticos: {int(k.get('critical_orders') or 0)}",f"On Time: {_pct_text(k.get('on_time'))}"]; paths=['/logistica','/diagnostico']; actions=['Atacar a causa dominante do OTIF nos pedidos críticos.','Revisar rotas com maior frete/un e baixa ocupação.']
+    elif any(w in q for w in ['material','supply','estoque','fornecedor','consumo']):
+        k=mat.get('kpis',{}); top=(mat.get('materials') or [None])[0]
+        answer=f"Materiais & Supply: consumo real {k.get('consumption_actual',0):.3f} kg/un versus padrão {k.get('consumption_standard',0):.3f} kg/un; cobertura {_pct_text(None) if k.get('coverage') is None else f'{k.get('coverage'):.1f} dias'}; aderência de fornecedor {_pct_text(k.get('supplier_adherence'))}." + (f" Principal material: {top.get('material')}, impacto {_money_text(top.get('impact'))}." if top else '')
+        evidence=[f"Materiais críticos: {int(k.get('critical_materials') or 0)}",f"Desvio MP: {_money_text(k.get('material_deviation_value'))}"]; paths=['/materiais','/diagnostico']; actions=['Atacar o maior desvio de consumo.','Tratar materiais de risco alto com cobertura insuficiente.']
+    elif any(w in q for w in ['capacidade','gargalo','restrição','restricao','ociosidade']):
+        k=cap.get('kpis',{}); b=cap.get('bottleneck') or {}; m=cap.get('money',{})
+        answer=f"Capacidade: utilização {_pct_text(k.get('utilization'))}, capacidade ociosa {float(k.get('idle') or 0):,.0f} un e volume monetizável {float(m.get('monetizable') or 0):,.0f} un. Gargalo: {b.get('resource') or 'N/D'}."
+        evidence=[f"Impacto potencial: {_money_text(m.get('impact'))}",f"Demanda confirmada: {float(m.get('demand') or 0):,.0f} un"]; paths=['/capacidade','/diagnostico']; actions=['Remover restrição antes de adicionar CAPEX.','Monetizar somente volume coberto por demanda.']
+    elif any(w in q for w in ['ebitda','dre','finanças','financas','margem','resultado']):
+        k=fin.get('kpis',{}); br=fin.get('bridge',{}); top=(fin.get('operational_pressures') or [None])[0]
+        answer=f"Financeiro: Receita Líquida {_money_text(k.get('revenue'))}, EBITDA Gerencial {_money_text(k.get('ebitda'))} ({_pct_text(k.get('ebitda_margin'))}). A bridge mensal reconcilia com diferença {_money_text(br.get('reconciliation_diff'))}." + (f" Maior pressão operacional: {top.get('problem')} ({_money_text(top.get('impact'))})." if top else '')
+        evidence=[f"Margem Industrial: {_money_text(k.get('industrial_margin'))}",f"OPEX: {_money_text(k.get('opex'))}"]; paths=['/financas','/diagnostico']; actions=['Atacar a origem operacional das pressões.','Manter receita em risco e capital de giro separados do EBITDA.']
+    else:
+        top=(dg.get('problems') or [None])[0]; answer=cp.get('executive_conclusion',{}).get('text') or cp.get('executive',{}).get('summary','')
+        if top: answer+=f" Prioridade do Diagnóstico: {top.get('problem')} ({_money_text(top.get('impact') or top.get('risk_value'))})."
+        evidence=[x.get('text') for x in cp.get('insights',[])[:3]]; paths=['/cockpit','/diagnostico']; actions=[x.get('action') for x in dg.get('recommendations',[])[:3]]
+    return {'question':question,'answer':answer,'evidence':[x for x in evidence if x],'actions':[x for x in actions if x],'paths':paths,'plant':plant,'mode':'motor analítico determinístico; sem causalidade inventada'}
+
+
+def agent_screen(book, plant):
+    cp=cockpit(book,plant); dg=diagnosis_screen(book,plant)
+    return {'plant':plant,'starter_questions':['Onde está o maior impacto financeiro?','O que mais está derrubando o OEE?','Como está o OTIF e qual a principal causa?','Qual é a maior pressão no EBITDA Gerencial?','Onde está o principal gargalo de capacidade?'], 'executive_context':cp.get('executive_conclusion'),'top_problems':dg.get('problems',[])[:5]}
+
+
+def agent_query(book, plant, question):
+    return _agent_answer(book,plant,question)
