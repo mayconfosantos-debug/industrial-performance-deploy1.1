@@ -49,7 +49,7 @@ export default function DashboardClient({screen}){
     err?<div className="empty-state"><h2>Não foi possível carregar os dados</h2><p>{err}</p><button className="control-btn control-primary" onClick={()=>setReloadKey(k=>k+1)}>Tentar novamente</button></div>:
     <RuntimeBoundary key={`${screen}-${plant}-${reloadKey}`}><Screen screen={screen} data={data} plant={plant}/></RuntimeBoundary>
    }
-   <div className="footer-note">Industrial Performance v1.0.7 • Visual + Analytical Polish • dados, análises, drill-down e reconciliações em validação</div>
+   <div className="footer-note">Industrial Performance v1.0.7.1 • Deploy Recovery + Visual Analytics • dados, análises, drill-down e reconciliações em validação</div>
  </div></main></div>
 }
 
