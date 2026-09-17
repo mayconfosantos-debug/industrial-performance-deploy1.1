@@ -5,9 +5,9 @@ from pydantic import BaseModel
 import shutil, uuid
 import pandas as pd
 
-from .data import dashboard, dashboard_from_book, load_book, active_path, set_active, simulate, central_data, agent_query, DATA_DIR, SHEETS
+from .data import dashboard, dashboard_from_book, load_book, active_path, set_active, simulate, central_data, DATA_DIR, SHEETS
 
-app = FastAPI(title="Industrial Performance API", version="1.0.7")
+app = FastAPI(title="Industrial Performance API", version="1.0.3")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 class SimulationRequest(BaseModel):
@@ -16,7 +16,7 @@ class SimulationRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status":"ok","version":"1.0.7","active_base":active_path().name}
+    return {"status":"ok","version":"1.0.3","active_base":active_path().name}
 
 @app.get("/api/plants")
 def plants():
@@ -40,15 +40,6 @@ def get_dashboard(screen: str, plant: str="Planta Campinas"):
 @app.post("/api/simulate")
 def post_simulate(req: SimulationRequest):
     return simulate(load_book(), req.plant, req.targets)
-
-
-class AgentRequest(BaseModel):
-    plant: str = "Planta Campinas"
-    question: str
-
-@app.post("/api/agent")
-def post_agent(req: AgentRequest):
-    return agent_query(load_book(), req.plant, req.question)
 
 @app.get("/api/data-lake")
 def data_lake():
