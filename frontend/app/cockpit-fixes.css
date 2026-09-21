@@ -1,0 +1,37 @@
+/* Cockpit v1.0.5 — correção aditiva, sem alterar o motor ou os dados. */
+/* Os botões são .source-row (font:inherit) e anulavam o tamanho de fonte
+   da classe .opportunity, criando a sobreposição observada no Top 5. */
+.opportunity-list { min-width:0; width:100%; }
+.opportunity.source-row {
+  display:grid;
+  grid-template-columns:24px minmax(0,1fr);
+  grid-template-areas:"number title" ". pillar" ". impact";
+  column-gap:10px;
+  row-gap:4px;
+  align-items:start;
+  width:100%; min-width:0;
+  padding:12px 6px;
+  margin:0;
+  font-size:11px;
+  line-height:1.4;
+  overflow-wrap:anywhere;
+  white-space:normal;
+}
+.opportunity.source-row > .num { grid-area:number; width:22px;height:22px;align-self:start;font-size:11px; }
+.opportunity.source-row > b { grid-area:title;min-width:0;display:block;font-size:11px;line-height:1.4;overflow-wrap:anywhere;white-space:normal; }
+.opportunity.source-row > span:not(.num) { grid-area:pillar;min-width:0;font-size:10px;color:var(--muted);line-height:1.4;overflow-wrap:anywhere; }
+.opportunity.source-row > strong { grid-area:impact;min-width:0;justify-self:start;display:block;font-size:12px;color:var(--text);font-weight:800;line-height:1.4;white-space:normal;overflow-wrap:anywhere; }
+/* No card estreito, o selo nao disputa a mesma linha do titulo. */
+.panel.span-3 .panel-head { display:flex;flex-wrap:wrap;align-items:flex-start;row-gap:6px; }
+.panel.span-3 .panel-head-left { width:100%;flex:1 1 100%;min-width:0; }
+.panel .panel-head-left > div { min-width:0; }
+.panel.span-3 .panel-head .tag { max-width:100%;white-space:normal;overflow-wrap:anywhere;margin-left:52px;text-align:left;line-height:1.25; }
+.panel .panel-head h3,.panel .panel-head p {overflow-wrap:anywhere;}
+@media (max-width:1100px) {
+ .opportunity.source-row {grid-template-columns:24px minmax(0,1fr);}
+ .panel.span-3 .panel-head .tag { margin-left:0; }
+}
+@media (max-width:700px) {
+ .opportunity.source-row {font-size:12px;padding:14px 4px;}
+ .opportunity.source-row > b {font-size:12px;}
+}
