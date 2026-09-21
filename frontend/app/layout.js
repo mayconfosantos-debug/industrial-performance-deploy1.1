@@ -1,4 +1,5 @@
 import './globals.css'
+import './cockpit-fixes.css'
 
 export const metadata = {
   title: 'Industrial Performance | H2M Consulting',
