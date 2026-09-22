@@ -12,7 +12,7 @@ export async function getJSON(path, opts = {}) {
     if (hit && Date.now() - hit.at < TTL_MS) return hit.data
   }
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15000)
+  const timeout = setTimeout(() => controller.abort(), 30000)
   try {
     const res = await fetch(path, { ...opts, cache: 'no-store', signal: controller.signal })
     if (!res.ok) {
