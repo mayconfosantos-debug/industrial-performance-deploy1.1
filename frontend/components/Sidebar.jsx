@@ -2,7 +2,7 @@
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 
-const ACTIVE = new Set(['/cockpit','/diagnostico','/alavancas','/multiplantas','/pcp','/oee','/capacidade','/materiais','/logistica','/financas','/central-dados'])
+const ACTIVE = new Set(['/multiplantas','/cockpit','/pcp','/oee','/capacidade','/materiais','/logistica','/financas','/diagnostico','/alavancas','/central-dados'])
 const groups = [
   ['VISÃO', [['Visão Multiplantas','/multiplantas','▥',true],['Cockpit Executivo','/cockpit','◫']]],
   ['OPERAÇÃO', [['PCP & Aderência','/pcp','◎'],['Produção & OEE','/oee','◉'],['Capacidade','/capacidade','▦'],['Materiais & Supply','/materiais','⬟'],['Logística','/logistica','▰']]],
@@ -21,6 +21,6 @@ export default function Sidebar(){
       if(!active) return <div key={href} className="nav-item disabled" title="No radar da v1.0 — ainda não liberado para validação"><span className="nav-icon">{icon}</span><span>{name}</span><em>RADAR</em></div>
       return <Link key={href} className={`nav-item ${pathname===href?'active':''}`} href={href}><span className="nav-icon">{icon}</span><span>{name}</span>{full&&<b>FULL</b>}</Link>
     })}</section>)}</nav>
-    <div className="plan-box"><div><strong>Fase 1 · Validação</strong><span>Onze telas em análise de paridade com o documento v1.1. Sem homologação final; recursos de cadastro, agente, relatórios e plano de ação seguem no radar.</span></div></div>
+    <div className="plan-box"><div><strong>v1.0.4 · Análise / QA</strong><span>Dez painéis + Central de Dados em validação. Plano de Ação, Agente, Relatórios e módulos de administração permanecem no radar. Nenhuma tela foi declarada validada.</span></div></div>
   </aside>
 }
