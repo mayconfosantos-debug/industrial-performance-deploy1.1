@@ -176,7 +176,9 @@ def _finance_summary(book, plant):
     mpkg=vals.get("Consumo_MP_kg",0)
     conv=vals.get("MOD",0)+vals.get("GGF_Frete",0)+vals.get("GGF_Energia",0)+vals.get("GGF_Manutencao",0)+vals.get("GGF_Contratos_Servicos",0)+vals.get("GGF_Outros",0)
     vals["EBITDA_Margem_calc"]=ebitda/revenue if revenue else np.nan
-    vals["Custo_Conversao_un"]=conv/volume if volume else np.nan
+    production=plant_filter(book.get("Producao",pd.DataFrame()),plant)
+    production_units=float(production["Realizado"].sum()) if not production.empty else 0
+    vals["Custo_Conversao_un"]=conv/production_units if production_units else np.nan
     # Taxas/preços nunca são somados entre competências.
     vals["Preco_Medio_MP_kg"]=vals.get("Insumos_MP",0)/mpkg if mpkg else np.nan
     for c in ["Estoque_Dias","Prazo_Fornecedor_Dias","Prazo_Cliente_Dias"]:
@@ -199,10 +201,15 @@ def cockpit(book, plant):
     supply_cov=float(sup["Cobertura_Dias"].mean()) if not sup.empty else np.nan
     target_oee=_target(book,"OEE",.85); target_pcp=_target(book,"Aderência PCP",.98); target_otif=_target(book,"OTIF",.95); target_cap=_target(book,"Utilização Capacidade",.80)
     # health is normalized achievement, capped to avoid one metric overpowering the index
-    metrics={"OEE":(comp["oee"],target_oee),"PCP":(pcp_m["adherence"],target_pcp),"Capacidade":(cap_util,target_cap),"Materiais":(supply_adh,.95),"OTIF":(otif,target_otif)}
-    ratios={key:min(float(value)/target,1.15) if value is not None and pd.notna(value) and target else None for key,(value,target) in metrics.items()}
+    ratios={
+        "OEE": min((comp["oee"] or 0)/target_oee,1.15),
+        "PCP": min((pcp_m["adherence"] or 0)/target_pcp,1.15),
+        "Capacidade": min((cap_util or 0)/target_cap,1.15),
+        "Materiais": min((supply_adh or 0)/.95,1.15),
+        "OTIF": min((otif or 0)/target_otif,1.15),
+    }
     weights={"OEE":.35,"PCP":.20,"Capacidade":.15,"Materiais":.15,"OTIF":.15}
-    health=sum(ratios[k]*weights[k] for k in weights)*100 if all(v is not None for v in ratios.values()) else None
+    health=sum(ratios[k]*weights[k] for k in weights)*100
     # real monthly series
     oee_month=_oee_components(book,plant,True)
     pcp2=pcp.copy(); log2=log.copy(); d=_dre_plant(book,plant)
@@ -243,18 +250,15 @@ def cockpit(book, plant):
     ]
     opps=sorted(opps,key=lambda x:x["impact"],reverse=True)
     status=[]
-    for name,key,val,target in [("OEE","OEE",comp["oee"],target_oee),("Aderência PCP","PCP",pcp_m["adherence"],target_pcp),("Capacidade","Capacidade",cap_util,target_cap),("Aderência fornecedores (proxy Supply)","Materiais",supply_adh,.95),("OTIF","OTIF",otif,target_otif)]:
-        state="na" if val is None or pd.isna(val) else "good" if val>=target else "warn" if val>=target*.9 else "bad"
-        status.append({"key":key,"weight":weights[key],"name":name,"value":val,"target":target,"state":state})
+    for name,val,target in [("OEE",comp["oee"],target_oee),("Aderência PCP",pcp_m["adherence"],target_pcp),("Capacidade",cap_util,target_cap),("Aderência fornecedores",supply_adh,.95),("OTIF",otif,target_otif)]:
+        state="good" if val is not None and val>=target else "warn" if val is not None and val>=target*.9 else "bad"
+        status.append({"name":name,"value":val,"target":target,"state":state})
     # O Cockpit usa o mesmo conjunto monetizado do Diagnóstico para que o Pareto financeiro reconcilie
     # e para não somar receita em risco, causas de OEE e capacidade duas vezes.
     diag=diagnosis_screen(book,plant)
     opps=[{"name":p["problem"],"pillar":p["front"],"impact":p.get("impact",0),"evidence":p.get("evidence")} for p in diag.get("priced_problems",[])[:5]]
     money_total=float(diag.get("cards",{}).get("impact",0) or 0)
-    cost_total=(fin.get("Receita_Liquida",0) or 0)-(fin.get("EBITDA_Gerencial",0) or 0)
     return {
-        "financial":{"revenue":fin.get("Receita_Liquida"),"total_cost":cost_total,"ebitda":fin.get("EBITDA_Gerencial")},
-        "analysis":diag.get("insights",[]),"recommendations":diag.get("recommendations",[]),
         "plant":plant,"kpis":{"production":produced,"oee":comp["oee"],"adherence":pcp_m["adherence"],"conversion_cost":fin.get("Custo_Conversao_un"),"ebitda":fin.get("EBITDA_Gerencial"),"ebitda_margin":fin.get("EBITDA_Margem_calc"),"otif":otif},
         "series":series,"health":{"score":health,"status":status},"opportunities":opps,"money_total":money_total,
         "pillar":[
@@ -277,8 +281,7 @@ def multiplant(book):
         comp=_oee_components(book,p); fin=_finance_summary(book,p); pcp=plant_filter(book.get("PCP",pd.DataFrame()),p)
         prod=float(pcp["Produzido"].sum()) if not pcp.empty else 0; total_prod+=prod; total_rev+=fin.get("Receita_Liquida",0); total_ebitda+=fin.get("EBITDA_Gerencial",0)
         rows.append({"plant":p,"production":prod,"oee":comp["oee"],"availability":comp["availability"],"performance":comp["performance"],"quality":comp["quality"],"conversion_cost":fin.get("Custo_Conversao_un")})
-    valid_oee=[x for x in rows if x["oee"] is not None]
-    best=max(valid_oee,key=lambda x:x["oee"]) if valid_oee else None; worst=min(valid_oee,key=lambda x:x["oee"]) if valid_oee else None
+    best=max(rows,key=lambda x:x["oee"] or 0) if rows else None; worst=min(rows,key=lambda x:x["oee"] or 9) if rows else None
     # monthly OEE per plant
     evolution=[]
     for p in plants:
@@ -331,13 +334,17 @@ def oee_screen(book, plant):
     performance=[]
     if not p.empty:
         for line,g in p.groupby("Linha"):
-            loss=float(((g["Velocidade_Nominal"]-g["Velocidade_Real"]).clip(lower=0)*g["Realizado"]).sum())
-            performance.append({"cause":f"Baixa velocidade — {line}","units":loss})
+            # Unidade correta: unidades realizadas × (velocidade nominal / real − 1).
+            # Este é potencial técnico estimado, não volume vendido e não é monetizado.
+            real=pd.to_numeric(g["Velocidade_Real"],errors="coerce"); nominal=pd.to_numeric(g["Velocidade_Nominal"],errors="coerce")
+            valid=real>0
+            loss=float((g.loc[valid,"Realizado"]*((nominal[valid]/real[valid]-1).clip(lower=0))).sum())
+            performance.append({"cause":f"Baixa velocidade — {line}","line":line,"units":loss,"unit":"unidades técnicas potenciais; validar regime/ciclo"})
         performance=sorted(performance,key=lambda x:x["units"],reverse=True)
     quality=[]
     if not q.empty:
         for prod,g in q.groupby("Produto"):
-            quality.append({"cause":f"Refugo / retrabalho — {prod}","units":float(g["Refugo"].sum()+g["Retrabalho"].sum()),"scrap":float(g["Refugo"].sum()),"rework":float(g["Retrabalho"].sum())})
+            quality.append({"cause":f"Refugo / retrabalho — {prod}","product":prod,"units":float(g["Refugo"].sum()+g["Retrabalho"].sum()),"scrap":float(g["Refugo"].sum()),"rework":float(g["Retrabalho"].sum())})
         quality=sorted(quality,key=lambda x:x["units"],reverse=True)
     line_rows=[]
     if not p.empty:
@@ -360,7 +367,7 @@ def capacity_screen(book, plant):
         c=float(g["Capacidade_Nominal_Un"].sum()); p=float(g["Producao_Real_Un"].sum()); monthly.append({"period":month_label(m),"capacity":c,"production":p,"utilization":p/c if c else np.nan})
     resource=[]
     for line,g in d.groupby("Linha"):
-        c=float(g["Capacidade_Nominal_Un"].sum()); p=float(g["Producao_Real_Un"].sum()); resource.append({"line":line,"utilization":p/c if c else np.nan,"capacity":c,"status":"Gargalo potencial" if c and p/c>=.9 else "Atenção" if c and p/c>=.8 else "Normal" if c else "N/D"})
+        c=float(g["Capacidade_Nominal_Un"].sum()); p=float(g["Producao_Real_Un"].sum()); resource.append({"line":line,"utilization":p/c if c else np.nan,"capacity":c,"status":str(g["Status_Recurso"].mode().iloc[0]) if "Status_Recurso" in g.columns and not g["Status_Recurso"].mode().empty else "N/A"})
     base_util=prod/cap if cap else 0
     scenarios=[]
     for util in [base_util,.75,.80,.85,.90]:
@@ -368,9 +375,6 @@ def capacity_screen(book, plant):
     fin=_finance_summary(book,plant); margin_unit=fin.get("Margem_Industrial",0)/(fin.get("Volume_Vendido",1) or 1)
     return {"kpis":{"capacity":cap,"production":prod,"utilization":base_util,"idle":idle,"potential":max(cap*.80-prod,0)},"monthly":monthly,"resources":sorted(resource,key=lambda x:x["utilization"],reverse=True),"scenarios":scenarios,"money":{"idle":idle,"recoverable":rec,"demand":dem,"monetizable":mon,"margin_unit":margin_unit,"impact":mon*margin_unit}}
 
-
-def sumcol_safe(df,col):
-    return float(pd.to_numeric(df[col], errors="coerce").sum()) if not df.empty and col in df.columns else 0.0
 
 def materials_screen(book, plant):
     d=plant_filter(book.get("Supply",pd.DataFrame()),plant)
@@ -387,8 +391,7 @@ def materials_screen(book, plant):
     supply=[]
     for material,g in d.groupby("Material"):
         supply.append({"material":material,"supplier":str(g["Fornecedor"].mode().iloc[0]),"coverage":float(g["Cobertura_Dias"].mean()),"lead_time":float(g["Lead_Time_Dias"].mean()),"adherence":float(g["Aderencia_Fornecedor"].mean()),"risk":str(g["Risco"].mode().iloc[0]),"impact_production":float(g["Impacto_Producao_Un"].sum())})
-    produced_total=sumcol_safe(plant_filter(book.get("Producao",pd.DataFrame()),plant),"Realizado")
-    return {"kpis":{"standard_unit":std/produced_total if produced_total else None,"actual_unit":real/produced_total if produced_total else None,"deviation_value":float(dev.sum()),"coverage":coverage,"critical":critical,"supplier_adherence":adherence},"monthly":monthly,"materials":mat,"supply":supply,"money":{"emergency":float(d["Compra_Emergencial_R$"].sum()),"excess":float(d["Estoque_Excesso_R$"].sum()),"production_risk_units":float(d["Impacto_Producao_Un"].sum())}}
+    return {"kpis":{"standard_unit":std/float(plant_filter(book.get("Producao",pd.DataFrame()),plant)["Realizado"].sum()),"actual_unit":real/float(plant_filter(book.get("Producao",pd.DataFrame()),plant)["Realizado"].sum()),"deviation_value":float(dev.sum()),"coverage":coverage,"critical":critical,"supplier_adherence":adherence},"monthly":monthly,"materials":mat,"supply":supply,"money":{"emergency":float(d["Compra_Emergencial_R$"].sum()),"excess":float(d["Estoque_Excesso_R$"].sum()),"production_risk_units":float(d["Impacto_Producao_Un"].sum())}}
 
 
 def logistics_screen(book, plant):
@@ -449,10 +452,10 @@ def diagnosis_screen(book, plant):
         direct = (float(x.get("scrap",0)) / total_q_produced * mp_total) if total_q_produced else 0
         problems.append({
             "problem": x["cause"], "front":"Produção & OEE", "component":"Qualidade",
-            "impact": 0.0, "monetized": False, "risk_value": 0, "potential_overlap_value": direct,
-            "evidence": f"{int(x.get('scrap',0))} un refugo · {int(x.get('rework',0))} un retrabalho; MP do refugo é apenas referência causal, não somada ao excesso de consumo",
+            "impact": direct, "monetized": direct > 0, "risk_value": 0,
+            "evidence": f"{int(x.get('scrap',0))} un refugo · {int(x.get('rework',0))} un retrabalho",
             "action":"Eliminar a causa dominante de refugo e estabilizar o processo do SKU ofensor.",
-            "effort":None, "horizon":None, "priority":"A VALIDAR"
+            "effort":2, "horizon":"Até 90 dias", "priority":"Alta"
         })
     # Disponibilidade: causa comprovada, mas sem monetização adicional aqui para não duplicar Capacidade.
     for x in oee.get("availability_offenders", [])[:3]:
@@ -461,7 +464,7 @@ def diagnosis_screen(book, plant):
             "impact": 0.0, "monetized": False, "risk_value": 0,
             "evidence": f"{float(x.get('hours',0)):.1f} h de parada registradas",
             "action":"Atacar a causa de parada com plano de contenção, causa raiz e rotina de confiabilidade.",
-            "effort":None, "horizon":None, "priority":"A VALIDAR"
+            "effort":3, "horizon":"3–6 meses", "priority":"Alta"
         })
     # Logística: receita em risco fica separada de EBITDA, conforme regra do produto.
     orders = plant_filter(book.get("Pedidos_Logistica", pd.DataFrame()), plant)
@@ -474,27 +477,27 @@ def diagnosis_screen(book, plant):
                 "impact":0.0, "monetized":False, "risk_value":risk,
                 "evidence":f"{len(g)} pedidos fora de OTIF · R$ {risk:,.0f} de receita em risco",
                 "action":"Priorizar pedidos por valor em risco e eliminar a causa recorrente de não-OTIF.",
-                "effort":None, "horizon":None, "priority":"A VALIDAR"
+                "effort":2, "horizon":"Até 90 dias", "priority":"Alta"
             })
     # Materiais: desvio de consumo valorizado diretamente pelo preço da MP.
-    for x in mat.get("materials", []):
+    for x in mat.get("materials", [])[:4]:
         impact=float(x.get("impact",0) or 0)
         problems.append({
             "problem":f"Desvio de consumo — {x['material']}", "front":"Materiais & Supply", "component":"Consumo MP",
             "impact":impact, "monetized":impact>0, "risk_value":0,
             "evidence":x.get("evidence") or "Desvio medido na base",
             "action":"Revisar padrão, rendimento e perdas físicas do material ofensor; confirmar causa antes de capturar valor.",
-            "effort":None, "horizon":None, "priority":"A VALIDAR"
+            "effort":2, "horizon":"Até 90 dias", "priority":"Alta" if impact>0 else "Média"
         })
     # Capacidade: monetização apenas sobre volume explicitamente monetizável/demand-backed.
     if cap:
         impact=float(cap.get("money",{}).get("impact",0) or 0)
         problems.append({
             "problem":"Capacidade monetizável não capturada", "front":"Capacidade", "component":"Utilização",
-            "impact":0.0, "monetized":False, "risk_value":0, "potential_overlap_value":impact,
+            "impact":impact, "monetized":impact>0, "risk_value":0,
             "evidence":f"{cap['money'].get('monetizable',0):.0f} un monetizáveis com demanda",
             "action":"Remover a restrição do recurso gargalo e capturar apenas o volume suportado por demanda confirmada.",
-            "effort":None, "horizon":None, "priority":"A VALIDAR"
+            "effort":4, "horizon":"3–6 meses", "priority":"Alta" if impact>0 else "Média"
         })
     # PCP: gap operacional fica causal; não soma R$ para evitar sobreposição com capacidade/volume.
     if pcp.get("metrics"):
@@ -505,7 +508,7 @@ def diagnosis_screen(book, plant):
                 "impact":0.0, "monetized":False, "risk_value":0,
                 "evidence":f"{short:.0f} un abaixo do plano no período",
                 "action":"Separar restrição de planejamento da restrição de execução e atacar os SKUs de maior contribuição ao gap.",
-                "effort":None, "horizon":None, "priority":"A VALIDAR"
+                "effort":2, "horizon":"Até 90 dias", "priority":"Alta"
             })
 
     problems=sorted(problems,key=lambda x:(x.get("impact",0),x.get("risk_value",0)),reverse=True)
@@ -515,13 +518,16 @@ def diagnosis_screen(book, plant):
         ps=[p for p in problems if p["front"]==front]
         impact=sum(float(p.get("impact",0) or 0) for p in ps)
         risk=sum(float(p.get("risk_value",0) or 0) for p in ps)
-        byfront.append({"front":front,"problems":len(ps),"impact":impact,"risk":risk,"potential":None,"capture":None,"status":"evidence" if ps else "no_material_issue"})
+        byfront.append({"front":front,"problems":len(ps),"impact":impact,"risk":risk,"potential":impact*.70 if impact else 0,"capture":.70 if impact else None,"status":"evidence" if ps else "no_material_issue"})
 
     total=sum(x["impact"] for x in byfront)
     revenue_risk=sum(x["risk"] for x in byfront)
-    potential=None
-    quick=[]  # Sem esforço/prazo validados, classificar quick-win seria arbitrário.
-    horizons=[]  # Dependente de prazos comprovados por ação.
+    potential=sum(x["potential"] for x in byfront)
+    quick=[p for p in problems if p.get("effort",5)<=2 and p.get("horizon")=="Até 90 dias"]
+    horizons=[]
+    for h in ["Até 90 dias","3–6 meses","6–12 meses"]:
+        hp=[p for p in problems if p.get("horizon")==h]
+        horizons.append({"horizon":h,"impact":sum(float(p.get("impact",0) or 0) for p in hp),"risk":sum(float(p.get("risk_value",0) or 0) for p in hp),"problems":len(hp)})
 
     monetized=[p for p in problems if float(p.get("impact",0) or 0)>0]
     top=monetized[0] if monetized else (problems[0] if problems else None)
@@ -543,11 +549,11 @@ def diagnosis_screen(book, plant):
         recs.append({"rank":i,"problem":p["problem"],"front":p["front"],"action":p["action"],"impact":p.get("impact",0),"risk_value":p.get("risk_value",0),"horizon":p.get("horizon"),"priority":p.get("priority")})
 
     return {
-        "cards":{"problems":len(problems),"impact":total,"potential":potential,"quick_value":None,"actions":len(recs),"payback_months":None,"revenue_risk":revenue_risk},
+        "cards":{"problems":len(problems),"impact":total,"potential":potential,"quick_value":sum(float(p.get("impact",0) or 0)*.70 for p in quick),"actions":len(recs),"payback_months":None,"revenue_risk":revenue_risk},
         "fronts":byfront,"problems":problems[:16],"priced_problems":monetized[:12],"quickwins":quick[:8],"horizons":horizons,
         "insights":insights,"recommendations":recs,
         "risk":{"direct_impact":total,"revenue_risk":revenue_risk,"top_problem":top["problem"] if top else None},
-        "assumptions":["Taxa de captura, esforço, prazo e investimento por ação exigem premissas validadas; não aplicar 70% arbitrários.","Receita em risco de OTIF é exibida separadamente e não é somada ao EBITDA.","Causas sem monetização confiável permanecem visíveis como evidência, sem R$ inventado."]
+        "assumptions":["Potencial de captura usado no MVP = 70% apenas sobre impactos monetizados; parametrização por tipo de ação continua A VALIDAR.","Receita em risco de OTIF é exibida separadamente e não é somada ao EBITDA.","Causas sem monetização confiável permanecem visíveis como evidência, sem R$ inventado."]
     }
 
 def levers_screen(book, plant):
@@ -595,6 +601,11 @@ def levers_screen(book, plant):
                 std_mp = float(np.average(weighted, weights=weights))
 
     scrap = 1 - comp["quality"] if comp.get("quality") is not None else 0
+    # MP total da DRE inclui a perda de refugo. Separar parcela atribuível à qualidade
+    # antes de permitir a alavanca independente de consumo, evitando dupla contagem.
+    if std_mp not in (None,0) and volume > 0 and comp.get("quality") not in (None,0):
+        scrap_units_baseline=volume/comp["quality"]-volume
+        mp_consumption=max((f.get("Consumo_MP_kg",0)-scrap_units_baseline*std_mp)/volume,0)
     material_loss = max(mp_consumption / std_mp - 1, 0) if std_mp not in (None, 0) else 0
     current = {
         "volume": float(volume), "price": float(price), "mix": float(mix),
@@ -603,7 +614,9 @@ def levers_screen(book, plant):
         "contracts": float(contracts), "fixed": float(fixed),
         "availability": comp.get("availability"), "performance": comp.get("performance"), "scrap": float(scrap),
     }
-    suggestions = {}  # Cenários automáticos exigem premissas aprovadas; metas são editadas pelo usuário.
+    # No unapproved default percentage improvement. Manual scenario only.
+    suggestions = current.copy()
+
     return {
         "current": current,
         "suggestions": suggestions,
@@ -642,13 +655,7 @@ def simulate(book, plant, targets: dict[str, float]):
         val = targets.get(key, cur.get(key))
         return float(cur.get(key) if val is None else val)
 
-    requested_volume = max(t("volume"), 0)
-    # Demanda confirmada é condição de monetização de unidades adicionais.
-    # Somente o volume incremental explicitamente identificado como monetizável
-    # na base de Capacidade pode entrar no cenário financeiro.
-    demand_backed = max(0.0, float(base.get("capacity", {}).get("monetizable", 0) or 0))
-    volume_t = min(requested_volume, volume0 + demand_backed) if requested_volume > volume0 else requested_volume
-    volume_limited = requested_volume > volume_t + 1e-7
+    volume_t = max(t("volume"), 0)
     price_t = max(t("price"), 0)
     mix_t = min(max(t("mix"), 0), 1)
     mp_price_t = max(t("mp_price"), 0)
@@ -709,56 +716,55 @@ def simulate(book, plant, targets: dict[str, float]):
     freight_proj = freight_t * volume_t
     energy_proj = float(f.get("GGF_Energia", 0) or 0) * vol_ratio
     availability0 = float(cur.get("availability") or 0)
-    # Disponibilidade não gera redução automática de despesa de manutenção.
-    maint_proj = float(f.get("GGF_Manutencao", 0) or 0)
+    maint_proj = float(f.get("GGF_Manutencao", 0) or 0)  # Sem hipótese validada de custo evitável
     other_ggf_proj = float(f.get("GGF_Outros", 0) or 0) * vol_ratio
 
     margin_ind_proj = revenue_proj - mp_proj - mod_proj - freight_proj - energy_proj - maint_proj - contracts_t - other_ggf_proj
     result_ind_proj = margin_ind_proj - fixed_t
-    # OPEX não escala automaticamente: sem uma premissa validada permanece constante.
+    # Despesas sem alavanca explícita permanecem constantes: não presumir 20% de escala.
     opex_proj_parts = {k: float(f.get(k, 0) or 0) for k in opex_parts}
     opex_proj = sum(opex_proj_parts.values())
     ebitda_proj = result_ind_proj - opex_proj
     delta_ebitda = ebitda_proj - ebitda0
 
-    # Bridge de atribuição disjunta: cada centavo é rastreado à DRE projetada.
-    # D/P/Q explicam capacidade; só o volume efectivamente demand-backed é monetizado.
-    price0 = float(cur.get("price", 0) or 0)
-    mp_price0 = float(cur.get("mp_price", 0) or 0)
-    cons0 = float(cur.get("mp_consumption", 0) or 0)
-    freight0 = float(cur.get("freight_unit", 0) or 0)
-    scrap_at_volume0 = volume_t / max(1e-9, 1-current_scrap) - volume_t
-    mass_at_volume = volume_t * cons0 + scrap_at_volume0 * std_mp
-    mass_after_scrap = volume_t * cons0 + scrap_units_proj * std_mp
-    mass_after_consumption = volume_t * cons_t + scrap_units_proj * std_mp
-    volume_impact = (volume_t-volume0)*price0 \
-        -(mass_at_volume-base_raw_mp_kg)*mp_price0 \
-        -(volume_t-volume0)*freight0 \
-        -(mod_proj-float(f.get("MOD",0) or 0)) \
-        -(energy_proj-float(f.get("GGF_Energia",0) or 0)) \
-        -(other_ggf_proj-float(f.get("GGF_Outros",0) or 0))
-    bridge = [
-        {"key":"volume","label":"Volume com demanda comprovada","impact":volume_impact,"source":"DRE: receita, MP, MOD, frete, energia, GGF outros"},
-        {"key":"price","label":"Preço médio","impact":(price_t-price0)*volume_t,"source":"DRE: Receita Líquida"},
-        {"key":"mix","label":"Mix","impact":mix_units*dp_mix,"source":"Padroes_Produto: preço padrão / DRE: Receita"},
-        {"key":"scrap","label":"Qualidade / Refugo","impact":-(mass_after_scrap-mass_at_volume)*mp_price0,"source":"Qualidade.Refugo / DRE: MP"},
-        {"key":"mp_consumption","label":"Consumo MP","impact":-(mass_after_consumption-mass_after_scrap)*mp_price0,"source":"DRE: consumo e custo MP"},
-        {"key":"mp_price","label":"Preço MP","impact":-mass_after_consumption*(mp_price_t-mp_price0),"source":"DRE: preço médio MP"},
-        {"key":"freight","label":"Tarifa frete","impact":-(freight_t-freight0)*volume_t,"source":"DRE: GGF Frete"},
-        {"key":"contracts","label":"Contratos / serviços","impact":float(cur.get("contracts",0) or 0)-contracts_t,"source":"DRE: GGF Contratos e Serviços"},
-        {"key":"fixed","label":"Custo fixo","impact":float(cur.get("fixed",0) or 0)-fixed_t,"source":"DRE: Custos Fixos Industriais"},
+    # Bridge incremental EXATA, por variação algébrica dos termos efetivamente usados
+    # na DRE. OEE é habilitador causal, não impacto aditivo independente de volume.
+    price0=float(cur.get("price",0) or 0);cons0=float(cur.get("mp_consumption",0) or 0)
+    mp0_price=float(cur.get("mp_price",0) or 0);freight0=float(cur.get("freight_unit",0) or 0)
+    delta_units=volume_t-volume0
+    # Receitas: volume + preço + mix (decomposição exata, sem custo de mix inferido).
+    revenue_volume=delta_units*price0
+    revenue_price=volume_t*(price_t-price0)
+    revenue_mix=mix_units*dp_mix
+    # MP: preço sobre massa BASE, volume sobre consumo sem refugo,
+    # consumo específico e refugo separados, nesta ordem de atribuição.
+    mp_price_effect=base_raw_mp_kg*(mp0_price-mp_price_t)
+    mp_volume_effect=-delta_units*cons0*mp_price_t
+    mp_consumption_effect=volume_t*(cons0-cons_t)*mp_price_t
+    mp_scrap_effect=(current_scrap_units-scrap_units_proj)*std_mp*mp_price_t
+    # Volume incorpora seus custos variáveis sem criar barra extra de OEE.
+    volume_effect=revenue_volume+mp_volume_effect-delta_units*freight0
+    volume_effect+=float(f.get("MOD",0) or 0)-mod_proj
+    volume_effect+=float(f.get("GGF_Energia",0) or 0)-energy_proj
+    volume_effect+=float(f.get("GGF_Outros",0) or 0)-other_ggf_proj
+    split=captured_oee_units/delta_units if delta_units>0 else 0.0
+    bridge=[
+      {"key":"oee_capacity","label":"Volume habilitado por OEE*","impact":volume_effect*split},
+      {"key":"volume","label":"Volume comercial*","impact":volume_effect*(1-split)},
+      {"key":"price","label":"Preço médio","impact":revenue_price},
+      {"key":"mix","label":"Mix (receita; custo A VALIDAR)","impact":revenue_mix},
+      {"key":"mp_price","label":"Preço de MP","impact":mp_price_effect},
+      {"key":"mp_consumption","label":"Consumo MP sem refugo","impact":mp_consumption_effect},
+      {"key":"scrap","label":"Qualidade / Refugo","impact":mp_scrap_effect},
+      {"key":"freight","label":"Frete/unidade","impact":volume_t*(freight0-freight_t)},
+      {"key":"contracts","label":"Contratos / Serviços","impact":float(f.get("GGF_Contratos_Servicos",0) or 0)-contracts_t},
+      {"key":"fixed","label":"Custos fixos","impact":float(f.get("Custos_Fixos_Industriais",0) or 0)-fixed_t},
+      {"key":"maintenance","label":"Manutenção","impact":float(f.get("GGF_Manutencao",0) or 0)-maint_proj},
     ]
-    # Deltas de contas não ajustadas permanecem explícitos e só se tornam barras
-    # quando as próprias contas mudarem; nunca preencher bridge com ajuste residual.
-    if abs(maint_proj-float(f.get("GGF_Manutencao",0) or 0)) > 1e-7:
-        bridge.append({"key":"maintenance","label":"Manutenção","impact":float(f.get("GGF_Manutencao",0))-maint_proj,"source":"DRE: GGF Manutenção"})
-    for k in opex_parts:
-        impact=float(f.get(k,0) or 0)-opex_proj_parts[k]
-        if abs(impact)>1e-7:
-            bridge.append({"key":k,"label":k.replace("Desp_","Despesas "),"impact":impact,"source":f"DRE: {k}"})
-    bridge=[{**x,"impact":float(x["impact"])} for x in bridge if abs(x["impact"])>1e-7]
-    residual = float(delta_ebitda-sum(x["impact"] for x in bridge))
-    reconciliation=residual
+    bridge=[{**item,"impact":float(item["impact"])} for item in bridge if abs(item['impact'])>1e-7]
+    reconciliation=delta_ebitda-sum(item['impact'] for item in bridge)
+    if abs(reconciliation)>.01:
+        raise ValueError(f'Bridge não reconcilia; diferença R$ {reconciliation:.2f}. Revisar fórmula antes de exibir resultado.')
 
     current_lines = {
         "Receita Bruta": float(f.get("Receita_Bruta",0) or 0),
@@ -800,9 +806,9 @@ def simulate(book, plant, targets: dict[str, float]):
 
     return {
         "base": base, "targets": targets,
-        "oee": {"current": oee_current, "projected": oee_target, "quality": Q_t, "captured_units": captured_oee_units, "commercial_units": commercial_units, "requested_volume":requested_volume,"effective_volume":volume_t,"volume_limited_by_demand":volume_limited,"demand_backed":demand_backed},
+        "oee": {"current": oee_current, "projected": oee_target, "quality": Q_t, "captured_units": captured_oee_units, "commercial_units": commercial_units},
         "impacts": bridge,
-        "bridge": {"items": bridge, "reconciliation_diff": reconciliation, "unattributed_delta":residual, "attribution_complete":abs(residual)<=0.05},
+        "bridge": {"items": bridge, "reconciliation_diff": reconciliation,"assumptions":["*Volume adicional depende de demanda vendável confirmada; OEE não gera EBITDA sozinho.","Preço/volume/mix usam decomposição algébrica da receita; custo incremental de mix por SKU A VALIDAR.","MP: consumo sem refugo e qualidade/refugo são componentes distintos da equação; sem dupla contagem.","Manutenção, SG&A e custo fixo total ficam constantes sem driver explícito aprovado."]},
         "dre_compare": dre_compare,
         "ebitda": {
             "current": ebitda0, "projected": ebitda_proj, "delta": delta_ebitda,
@@ -824,7 +830,7 @@ def data_quality(book):
 
 def central_data(book):
     p=active_path(); quality=data_quality(book); total_rows=sum(x["rows"] for x in quality)
-    return {"active_file":p.name,"path":str(p),"sheets":len(book),"rows":total_rows,"quality":quality,"pipeline":["RAW","Classificação","DE/PARA inteligente","Standard Industrial Model","Data Quality","Semantic/Gold","Motores analíticos"]}
+    return {"active_file":p.name,"sheets":len(book),"rows":total_rows,"quality":quality,"pipeline":["RAW","Classificação","DE/PARA inteligente","Standard Industrial Model","Data Quality","Semantic/Gold","Motores analíticos"]}
 
 
 def dashboard_from_book(screen: str, plant: str, book: dict[str, pd.DataFrame]):
@@ -832,9 +838,7 @@ def dashboard_from_book(screen: str, plant: str, book: dict[str, pd.DataFrame]):
         "cockpit":lambda:cockpit(book,plant),"multiplantas":lambda:multiplant(book),"pcp":lambda:pcp_screen(book,plant),"oee":lambda:oee_screen(book,plant),"capacidade":lambda:capacity_screen(book,plant),"materiais":lambda:materials_screen(book,plant),"logistica":lambda:logistics_screen(book,plant),"financas":lambda:finance_screen(book,plant),"diagnostico":lambda:diagnosis_screen(book,plant),"alavancas":lambda:levers_screen(book,plant),"central-dados":lambda:central_data(book)
     }
     if screen not in mapping: return {"status":"planned","screen":screen}
-    result=mapping[screen]()
-    from .analytics_v104 import enrich
-    return enrich(screen,book,plant,result)
+    return mapping[screen]()
 
 
 def dashboard(screen: str, plant: str):
